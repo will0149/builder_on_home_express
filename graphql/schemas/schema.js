@@ -1,10 +1,11 @@
 const graphql = require('graphql');
-const Book = require('../../models/book');
-const Author = require('../../models/author');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const User = require("../../models/user")
 const Service = require("../../models/service")
 const Contract = require("../../models/contract")
-const { BookType, AuthorType, UserType, ServiceType, ContractType} = require("../types/types")
+const { UserType, ServiceType, ContractType, AuthDataType } = require("../types/types")
+//TODO: add isAuth validation to querys and mutations
 
 const {
     GraphQLObjectType, GraphQLString,
@@ -12,53 +13,22 @@ const {
     GraphQLList, GraphQLNonNull, GraphQLFloat
 } = graphql;
 
-//RootQuery describe how users can use the graph and grab data.
-//E.g Root query to get all authors, get all books, get a particular 
-//book or get a particular author.
 const RootQuery = new GraphQLObjectType({
     name: 'RootQueryType',
     fields: {
-        book: {
-            type: BookType,
-            //argument passed by the user while making the query
-            args: { id: { type: GraphQLID } },
-            resolve(parent, args) {
-                //Here we define how to get data from database source
-
-                //this will return the book with id passed in argument 
-                //by the user
-                return Book.findById(args.id);
-            }
-        },
-        books: {
-            type: new GraphQLList(BookType),
-            resolve(parent, args) {
-                return Book.find({});
-            }
-        },
-        author: {
-            type: AuthorType,
-            args: { id: { type: GraphQLID } },
-            resolve(parent, args) {
-                return Author.findById(args.id);
-            }
-        },
-        authors: {
-            type: new GraphQLList(AuthorType),
-            resolve(parent, args) {
-                return Author.find({});
-            }
-        },
         user: {
             type: UserType,
             args: { id: { type: GraphQLID } },
-            resolve(parent, args) {
+            resolve(parent, args, req) {
                 return User.findById(args.id);
             }
         },
         users: {
             type: new GraphQLList(UserType),
-            resolve(parent, args) {
+            resolve(parent, args, req) {
+                // if (!req.isAuth) {
+                //     throw new Error('Unauthenticated!');
+                //   }
                 const users = User.find().exec();
                 if (!users) {
                     throw new Error('Error')
@@ -68,7 +38,7 @@ const RootQuery = new GraphQLObjectType({
         },
         services: {
             type: new GraphQLList(ServiceType),
-            resolve(parent, args) {
+            resolve(parent, args, req) {
                 const services = Service.find().exec();
                 if (!services) {
                     throw new Error('Error')
@@ -79,13 +49,13 @@ const RootQuery = new GraphQLObjectType({
         contract: {
             type: ContractType,
             args: { id: { type: GraphQLID } },
-            resolve(parent, args) {
+            resolve(parent, args, req) {
                 return Contract.findById(args.id);
             }
         },
         contracts: {
             type: new GraphQLList(ContractType),
-            resolve(parent, args) {
+            resolve(parent, args, req) {
                 const contracts = Contract.find().exec();
                 if (!contracts) {
                     throw new Error('Error')
@@ -93,44 +63,62 @@ const RootQuery = new GraphQLObjectType({
                 return contracts
             }
         },
+        login: {
+            type: AuthDataType,
+            args: {
+                email: { type: GraphQLString },
+                password: { type: GraphQLString }
+            },
+            async resolve(parent, args) {
+                try {
+                    console.log('arguments' + args.email);
+                    {
+                        let user = await User.findOne({ email: args.email }).exec();
+                        console.log('user ' + user.name);
+                        if (!user) {
+                            throw new Error('User does not exist!');
+                        }
+                        const isEqual = await bcrypt.compare(args.password, user.password);
+                        if (!isEqual) {
+                            throw new Error('Password is incorrect!');
+                        }
+                        const token = jwt.sign(
+                            { userId: user.id, email: user.email },
+                            'somesupersecretkey',
+                            {
+                                expiresIn: '1h'
+                            }
+                        );
+                        return { userId: user.id, token: token, tokenExpiration: 1 };
+                    }
+                } catch (error) {
+                    console.error(error);
+                    // expected output: ReferenceError: nonExistentFunction is not defined
+                    // Note - error messages will vary depending on browser
+                }
+            }
+        },
     }
 });
 
-//Very similar to RootQuery helps user to add/update to the database.
 const Mutation = new GraphQLObjectType({
     name: 'Mutation',
     fields: {
-        addAuthor: {
-            type: AuthorType,
-            args: {
-                //GraphQLNonNull make these field required
-                name: { type: new GraphQLNonNull(GraphQLString) },
-                age: { type: new GraphQLNonNull(GraphQLInt) }
-            },
-            resolve(parent, args) {
-                let author = new Author({
-                    name: args.name,
-                    age: args.age
-                });
-                return author.save();
-            }
-        },
-        addBook: {
-            type: BookType,
-            args: {
-                name: { type: new GraphQLNonNull(GraphQLString) },
-                pages: { type: new GraphQLNonNull(GraphQLInt) },
-                authorID: { type: new GraphQLNonNull(GraphQLID) }
-            },
-            resolve(parent, args) {
-                let book = new Book({
-                    name: args.name,
-                    pages: args.pages,
-                    authorID: args.authorID
-                })
-                return book.save()
-            }
-        },
+        // addAuthor: {
+        //     type: AuthorType,
+        //     args: {
+        //         //GraphQLNonNull make these field required
+        //         name: { type: new GraphQLNonNull(GraphQLString) },
+        //         age: { type: new GraphQLNonNull(GraphQLInt) }
+        //     },
+        //     resolve(parent, args) {
+        //         let author = new Author({
+        //             name: args.name,
+        //             age: args.age
+        //         });
+        //         return author.save();
+        //     }
+        // },
         addUser: {
             type: UserType,
             args: {
@@ -142,17 +130,18 @@ const Mutation = new GraphQLObjectType({
                 password: { type: new GraphQLNonNull(GraphQLString) },
                 typeID: { type: GraphQLString }
             },
-            resolve(parent, args) {
+            async resolve(parent, args, req) {
                 if (args.name == "") {
                     throw 'Campo requerido vacio';
                 }
+                const hashedPassword = await bcrypt.hash(args.password, 12);
                 let user = new User({
                     name: args.name,
                     age: args.age,
                     email: args.email,
                     phone_number: args.phone_number,
                     direction: args.direction,
-                    password: args.password,
+                    password: hashedPassword,
                     active: true,
                     rating: 0,
                     typeID: args.typeID,
@@ -177,14 +166,15 @@ const Mutation = new GraphQLObjectType({
                 password: { type: GraphQLString },
                 typeID: { type: GraphQLString }
             },
-            resolve(root, args) {
-                return User.findByIdAndUpdate(args.id, { 
+            async resolve(root, args, req) {
+                const hashedPassword = await bcrypt.hash(args.password, 12);
+                return User.findByIdAndUpdate(args.id, {
                     name: args.name,
                     age: args.age,
                     email: args.email,
                     phone_number: args.phone_number,
                     direction: args.direction,
-                    password: args.password,
+                    password: hashedPassword,
                     typeID: args.typeID,
                     updated_date: Date.now(),
                 }, function (err) {
@@ -199,7 +189,7 @@ const Mutation = new GraphQLObjectType({
                     type: new GraphQLNonNull(GraphQLString)
                 }
             },
-            resolve(root, params) {
+            resolve(root, params, req) {
                 const user = User.findByIdAndRemove(params.id).exec();
                 if (!user) {
                     throw new Error('Error')
@@ -216,7 +206,7 @@ const Mutation = new GraphQLObjectType({
                 description: { type: new GraphQLNonNull(GraphQLString) },
                 price: { type: GraphQLNonNull(GraphQLFloat) }
             },
-            resolve(parent, args) {
+            resolve(parent, args, req) {
                 if (args.name == "" || args.categoryID == "" || args.userID == "") {
                     throw 'Campo requerido vacio';
                 }
@@ -242,7 +232,7 @@ const Mutation = new GraphQLObjectType({
                 detail: { type: new GraphQLNonNull(GraphQLString) },
                 price: { type: GraphQLNonNull(GraphQLFloat) },
             },
-            resolve(parent, args) {
+            resolve(parent, args, req) {
                 if (args.clientID == "" || args.userID == "") {
                     throw 'Campo requerido vacio';
                 }
@@ -271,8 +261,8 @@ const Mutation = new GraphQLObjectType({
                 price: { type: GraphQLNonNull(GraphQLFloat) },
                 state: { type: new GraphQLNonNull(GraphQLString) },
             },
-            resolve(root, args) {
-                return Contract.findByIdAndUpdate(args.id, { 
+            resolve(root, args, req) {
+                return Contract.findByIdAndUpdate(args.id, {
                     serviceID: args.serviceID,
                     detail: args.detail,
                     price: args.price,
@@ -283,6 +273,7 @@ const Mutation = new GraphQLObjectType({
                 });
             }
         },
+
     }
 });
 
