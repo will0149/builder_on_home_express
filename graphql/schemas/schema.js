@@ -74,7 +74,6 @@ const RootQuery = new GraphQLObjectType({
                     console.log('arguments' + args.email);
                     {
                         let user = await User.findOne({ email: args.email }).exec();
-                        console.log('user ' + user.name);
                         if (!user) {
                             throw new Error('User does not exist!');
                         }
@@ -89,12 +88,10 @@ const RootQuery = new GraphQLObjectType({
                                 expiresIn: '1h'
                             }
                         );
-                        return { userId: user.id, token: token, tokenExpiration: 1 };
+                        return { userId: user.id, token: token, type: user.typeID, tokenExpiration: 1 };
                     }
                 } catch (error) {
                     console.error(error);
-                    // expected output: ReferenceError: nonExistentFunction is not defined
-                    // Note - error messages will vary depending on browser
                 }
             }
         },
@@ -122,20 +119,26 @@ const Mutation = new GraphQLObjectType({
         addUser: {
             type: UserType,
             args: {
-                name: { type: new GraphQLNonNull(GraphQLString) },
-                age: { type: new GraphQLNonNull(GraphQLInt) },
+                name: { type: GraphQLString },
+                age: { type: GraphQLInt },
                 email: { type: new GraphQLNonNull(GraphQLString) },
-                phone_number: { type: new GraphQLNonNull(GraphQLString) },
+                phone_number: { type: GraphQLString },
                 direction: { type: GraphQLString },
                 password: { type: new GraphQLNonNull(GraphQLString) },
                 typeID: { type: GraphQLString }
             },
             async resolve(parent, args, req) {
-                if (args.name == "") {
-                    throw 'Campo requerido vacio';
+                // if (args.name == "") {
+                //     throw 'Campo requerido vacio';
+                // }
+                let user = await User.findOne({ email: args.email }).exec();
+                if(user != null){
+                    if (user.email){
+                        throw 'ya existe un usuario con el correo';
+                    }
                 }
                 const hashedPassword = await bcrypt.hash(args.password, 12);
-                let user = new User({
+                user = new User({
                     name: args.name,
                     age: args.age,
                     email: args.email,
@@ -159,25 +162,20 @@ const Mutation = new GraphQLObjectType({
                     type: new GraphQLNonNull(GraphQLString)
                 },
                 name: { type: GraphQLString },
-                age: { type: GraphQLString },
-                email: { type: GraphQLString },
                 phone_number: { type: GraphQLString },
                 direction: { type: GraphQLString },
-                password: { type: GraphQLString },
-                typeID: { type: GraphQLString }
+                type: { type: GraphQLString }
             },
             async resolve(root, args, req) {
-                const hashedPassword = await bcrypt.hash(args.password, 12);
+                //const hashedPassword = await bcrypt.hash(args.password, 12);
                 return User.findByIdAndUpdate(args.id, {
                     name: args.name,
-                    age: args.age,
-                    email: args.email,
                     phone_number: args.phone_number,
                     direction: args.direction,
-                    password: hashedPassword,
-                    typeID: args.typeID,
+                    type: args.type,
                     updated_date: Date.now(),
                 }, function (err) {
+                    console.log(err);
                     if (err) return next(err);
                 });
             }

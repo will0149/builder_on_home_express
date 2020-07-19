@@ -21,7 +21,7 @@ const UserType = new GraphQLObjectType({
         password: { type: GraphQLString },
         active: { type: GraphQLBoolean },
         rating: { type: GraphQLInt },
-        type: { type: GraphQLInt },
+        type: { type: GraphQLString },
         created: { type: GraphQLDate },
         updated_date: {
             type: GraphQLDate
@@ -94,6 +94,7 @@ const AuthDataType = new GraphQLObjectType({
     fields: () => ({
         userId: { type: GraphQLID  },
         token: { type: GraphQLString },
+        type: { type: GraphQLString },
         tokenExpiration: { type: GraphQLString },
     })
 });
